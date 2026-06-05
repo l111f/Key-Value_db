@@ -1,0 +1,23 @@
+# Rust 编译产物
+/target/
+debug/
+*.pdb
+
+# Cargo 相关
+Cargo.lock
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统生成文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 环境和日志
+*.log
+*.env

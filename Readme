@@ -1,0 +1,165 @@
+
+### 模块说明
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| **KVEngine** | `kv_engine.rs` | 对外暴露的核心 API，协调所有子系统 |
+| **BPlusTree** | `btree.rs` | B+ 树索引实现，支持内部节点和叶子节点 |
+| **BufferPoolManager** | `buffer_pool.rs` | 内存缓冲池，LRU 淘汰策略，脏页管理 |
+| **DiskManager** | `disk_manager.rs` | 磁盘文件 I/O，页面分配与读写 |
+| **WALManager** | `wal.rs` | 预写式日志，记录操作历史用于恢复 |
+| **TransactionManager** | `transaction.rs` | 事务生命周期管理，快照与回滚 |
+| **RecoveryManager** | `recovery.rs` | 崩溃恢复，重放已提交事务，撤销未提交事务 |
+| **Page** | `page.rs` | 4KB 固定大小页面，包含 CRC32 校验 |
+| **Error** | `error.rs` | 统一错误类型定义 |
+
+### 数据文件
+
+| 文件类型 | 扩展名 | 说明 |
+|---------|--------|------|
+| 数据文件 | `.db` | 存储 B+ 树节点数据，每页 4KB |
+| 元数据文件 | `.meta` | 存储根节点页号等元信息 |
+| WAL 日志 | `.wal` | 预写式日志，记录所有写操作 |
+
+## 快速开始
+
+### 环境要求
+
+- Rust 1.70+ (Edition 2021)
+- 支持 Windows / Linux / macOS
+
+### 构建与运行
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd Key-Value_db
+
+# 构建
+cargo build
+
+# 运行示例
+cargo run
+
+# 运行测试
+cargo test
+```
+
+### 基本使用
+
+```rust
+use kv_engine::KVEngine;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 打开数据库
+    let mut engine = KVEngine::open("data/kvstore.db")?;
+
+    // 插入键值对
+    engine.put(b"name", b"Alice")?;
+    engine.put(b"age", b"30")?;
+
+    // 查询
+    if let Some(value) = engine.get(b"name")? {
+        println!("name = {}", String::from_utf8_lossy(&value));
+    }
+
+    // 范围扫描
+    let results = engine.scan(b"a", b"z")?;
+    for (key, value) in results {
+        println!("{} => {}", 
+            String::from_utf8_lossy(&key),
+            String::from_utf8_lossy(&value)
+        );
+    }
+
+    // 删除
+    engine.delete(b"age")?;
+
+    // 关闭数据库
+    engine.close()?;
+    Ok(())
+}
+```
+
+### 事务使用
+
+```rust
+use kv_engine::KVEngine;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = KVEngine::open("data/kvstore.db")?;
+
+    // 开启事务
+    engine.begin()?;
+
+    // 事务内操作
+    engine.put(b"key1", b"value1")?;
+    engine.put(b"key2", b"value2")?;
+
+    // 提交事务
+    engine.commit()?;
+
+    // 或者回滚
+    // engine.rollback()?;
+
+    engine.close()?;
+    Ok(())
+}
+```
+
+## 技术细节
+
+### B+ 树实现
+
+- **节点类型**：内部节点（Internal）和叶子节点（Leaf）
+- **节点容量**：根据阶数（order）动态计算
+- **分裂策略**：节点满时自动分裂，维护有序性
+- **叶子链表**：叶子节点通过 `next_leaf` 指针连接，支持高效范围扫描
+- **序列化**：节点数据序列化后存储在 4KB 页面中
+
+### 缓冲池管理
+
+- **LRU 淘汰**：基于访问时间戳的最近最少使用策略
+- **Pin/Unpin**：引用计数机制，防止正在使用的页面被淘汰
+- **脏页标记**：修改后的页面标记为 dirty，刷写时写入磁盘
+- **容量限制**：可配置缓冲池大小，超出时触发淘汰
+
+### WAL 日志
+
+- **记录格式**：LSN + TxnID + OpType + Key + Value + CRC32
+- **操作类型**：Put / Delete / Commit / Rollback
+- **CRC32 校验**：每条记录包含校验和，防止日志损坏
+- **恢复机制**：重启时重放已提交事务，撤销未提交事务
+
+### 事务管理
+
+- **ACID 支持**：
+  - **原子性**：通过 WAL 和回滚快照保证
+  - **一致性**：事务要么全部提交，要么全部回滚
+  - **隔离性**：事务内可读取未提交数据（Read Uncommitted）
+  - **持久性**：提交后数据持久化到磁盘
+- **快照机制**：记录修改前的旧值，用于回滚恢复
+
+### 崩溃恢复
+
+- **恢复流程**：
+  1. 读取 WAL 日志所有有效记录
+  2. 按事务 ID 分组
+  3. 识别已提交和未提交事务
+  4. 重放已提交事务（Redo）
+  5. 跳过未提交事务（Undo 通过回滚实现）
+- **统计信息**：记录重放和跳过的记录数
+
+## 测试覆盖
+
+项目包含 61 个单元测试，覆盖所有核心模块：
+
+- **B+ 树测试**：插入、查询、更新、删除、范围扫描、节点分裂
+- **缓冲池测试**：页面创建、获取、淘汰、LRU 顺序、脏页刷写
+- **磁盘管理器测试**：页面分配、读写、WAL 操作
+- **事务测试**：Begin/Commit/Rollback、嵌套事务错误处理
+- **WAL 测试**：记录序列化、追加、恢复、损坏检测
+- **恢复测试**：空恢复、已提交事务恢复
+- **KVEngine 测试**：完整 CRUD 操作、事务、持久性验证
+
+## 项目结构
