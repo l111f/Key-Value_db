@@ -253,6 +253,117 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **恢复测试**：空恢复、已提交事务恢复
 - **KVEngine 测试**：完整 CRUD 操作、事务、持久性验证
 
+## 🧪 测试结果
+
+以下是在项目根目录执行 `cargo test` 的真实终端输出（环境：Windows + Rust Edition 2021）：
+
+```text
+$ cargo test
+   Compiling kv-engine v0.1.0 (Key-Value_db)
+warning: unused variable: `p0`
+   --> src\buffer_pool.rs:377:14
+    |
+377 |         let (p0, _) = bpm.create_page().unwrap();
+    |              ^^ help: if this is intentional, prefix it with an underscore: `_p0`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `p1`
+   --> src\buffer_pool.rs:378:14
+    |
+378 |         let (p1, _) = bpm.create_page().unwrap();
+    |              ^^ help: if this is intentional, prefix it with an underscore: `_p1`
+
+warning: unused variable: `btree`
+   --> src\recovery.rs:185:17
+    |
+185 |         let (_, btree) = rm.into_components();
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_btree`
+
+warning: `kv-engine` (lib test) generated 3 warnings (run `cargo fix --lib -p kv-engine --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.89s
+     Running unittests src\lib.rs (target\debug\deps\kv_engine-1a4501934e192636.exe)
+
+running 61 tests
+test btree::tests::test_empty_tree_search ... ok
+test buffer_pool::tests::test_lru_order ... ok
+test buffer_pool::tests::test_create_page ... ok
+test buffer_pool::tests::test_fetch_page ... ok
+test buffer_pool::tests::test_mark_dirty_and_flush ... ok
+test buffer_pool::tests::test_eviction ... ok
+test btree::tests::test_remove ... ok
+test btree::tests::test_insert_update ... ok
+test btree::tests::test_insert_and_search ... ok
+test btree::tests::test_leaf_split ... ok
+test btree::tests::test_range_scan ... ok
+test buffer_pool::tests::test_pinned_cannot_evict ... ok
+test btree::tests::test_large_insert_and_search ... ok
+test disk_manager::tests::test_disk_manager_new ... ok
+test disk_manager::tests::test_alloc_and_read_page ... ok
+test buffer_pool::tests::test_shutdown ... ok
+test buffer_pool::tests::test_unpin ... ok
+test disk_manager::tests::test_multiple_alloc ... ok
+test disk_manager::tests::test_write_and_read_page ... ok
+test disk_manager::tests::test_wal_clear ... ok
+test disk_manager::tests::test_wal_write_and_read ... ok
+test disk_manager::tests::test_reopen_preserves_data ... ok
+test kv_engine::tests::test_commit_without_begin_error ... ok
+test kv_engine::tests::test_closed_database_operations ... ok
+test kv_engine::tests::test_open_close ... ok
+test kv_engine::tests::test_rollback_without_begin_error ... ok
+test page::tests::test_crc32_known_values ... ok
+test page::tests::test_crc_validation_failure ... ok
+test page::tests::test_crc_validation_success ... ok
+test page::tests::test_key_count ... ok
+test page::tests::test_page_new ... ok
+test page::tests::test_page_type ... ok
+test page::tests::test_serialize_deserialize ... ok
+test kv_engine::tests::test_scan_empty_db ... ok
+test kv_engine::tests::test_nested_transaction_error ... ok
+test recovery::tests::test_empty_recovery ... ok
+test transaction::tests::test_begin_transaction ... ok
+test transaction::tests::test_commit_no_transaction_error ... ok
+test transaction::tests::test_nested_transaction_error ... ok
+test kv_engine::tests::test_scan_no_match ... ok
+test transaction::tests::test_rollback_no_transaction_error ... ok
+test transaction::tests::test_commit_transaction ... ok
+test kv_engine::tests::test_persistence_across_reopen ... ok
+test kv_engine::tests::test_put_overwrite ... ok
+test kv_engine::tests::test_delete_and_reput ... ok
+test transaction::tests::test_put_and_get_uncommitted ... ok
+test kv_engine::tests::test_transaction_read_uncommitted ... ok
+test kv_engine::tests::test_transaction_commit ... ok
+test wal::tests::test_wal_corrupted_record ... ok
+test wal::tests::test_wal_record_delete_no_value ... ok
+test wal::tests::test_wal_record_serialize_deserialize ... ok
+test kv_engine::tests::test_transaction_rollback ... ok
+test kv_engine::tests::test_put_get_delete ... ok
+test transaction::tests::test_rollback_removes_new_key ... ok
+test recovery::tests::test_recovery_committed_txn ... ok
+test wal::tests::test_wal_clear ... ok
+test transaction::tests::test_rollback_transaction ... ok
+test wal::tests::test_wal_append_and_recover ... ok
+test transaction::tests::test_rollback_restores_old_value ... ok
+test wal::tests::test_wal_lsn_continuation ... ok
+test kv_engine::tests::test_scan ... ok
+
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running unittests src\main.rs (target\debug\deps\kv_engine-79a81c45b66d2ad0.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kv_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+> ✅ **结论**：全部 **61** 个单元测试通过，**0** 失败；编译期另有 **3** 条 `unused_variables` 警告（均为测试代码中的未使用变量，不影响功能）。
+
 ## 📁 项目结构
 
 ```
