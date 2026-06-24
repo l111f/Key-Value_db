@@ -220,6 +220,19 @@ impl TransactionManager {
     pub fn flush_all(&mut self) -> Result<()> {
         self.btree.flush_all()
     }
+
+    /// 分配自动事务 ID（用于非事务操作的 WAL 记录）
+    /// 不创建 Transaction 对象，仅递增 next_txn_id
+    pub fn auto_txn_id(&mut self) -> u64 {
+        let id = self.next_txn_id;
+        self.next_txn_id += 1;
+        id
+    }
+
+    /// 写入单条 WAL 记录（用于非事务操作的自动事务）
+    pub fn write_wal_record(&mut self, record: WALRecord) -> Result<u64> {
+        self.wal_manager.append(record)
+    }
 }
 
 #[cfg(test)]

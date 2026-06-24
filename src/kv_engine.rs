@@ -4,7 +4,14 @@ use crate::disk_manager::DiskManager;
 use crate::error::{KvError, Result};
 use crate::recovery::RecoveryManager;
 use crate::transaction::TransactionManager;
-use crate::wal::{WALManager, WALOpType};
+use crate::wal::{WALManager, WALOpType, WALRecord};
+
+/// 最大 key 长度 (字节)
+/// 页面大小为 4KB，扣除头部和数据区开销后取保守值 4060
+pub const MAX_KEY_SIZE: usize = 4060;
+
+/// 最大 value 长度 (字节)
+pub const MAX_VALUE_SIZE: usize = 4060;
 
 /// KV 存储引擎核心接口
 pub struct KVEngine {
@@ -77,16 +84,56 @@ impl KVEngine {
     /// 插入键值对
     pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         self.check_open()?;
+
+        // 键值大小校验（FR-012）
+        if key.len() > MAX_KEY_SIZE {
+            return Err(KvError::KeyTooLarge {
+                key_size: key.len(),
+                max_size: MAX_KEY_SIZE,
+            });
+        }
+        if value.len() > MAX_VALUE_SIZE {
+            return Err(KvError::ValueTooLarge {
+                value_size: value.len(),
+                max_size: MAX_VALUE_SIZE,
+            });
+        }
+
         let txn_mgr = self.txn_manager.as_mut().ok_or(KvError::DatabaseClosed)?;
 
         if txn_mgr.in_transaction() {
             txn_mgr.record_operation(WALOpType::Put, key, Some(value))?;
         } else {
+            // 非事务模式：自动事务包装，写入 WAL 日志确保持久性
+            let auto_id = txn_mgr.auto_txn_id();
+
+            // 写入 Put WAL 记录
+            let put_record = WALRecord {
+                lsn: 0,
+                txn_id: auto_id,
+                op_type: WALOpType::Put,
+                key: key.to_vec(),
+                value: Some(value.to_vec()),
+                crc: 0,
+            };
+            txn_mgr.write_wal_record(put_record)?;
+
+            // 执行 B+ 树插入
             txn_mgr.get_btree_mut().insert(key, value)?;
+
+            // 写入 Commit WAL 记录
+            let commit_record = WALRecord {
+                lsn: 0,
+                txn_id: auto_id,
+                op_type: WALOpType::Commit,
+                key: Vec::new(),
+                value: None,
+                crc: 0,
+            };
+            txn_mgr.write_wal_record(commit_record)?;
         }
         Ok(())
     }
-
     /// 获取键对应的值
     pub fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         self.check_open()?;
@@ -104,6 +151,7 @@ impl KVEngine {
     }
 
     /// 删除键
+    /// 删除键
     pub fn delete(&mut self, key: &[u8]) -> Result<bool> {
         self.check_open()?;
         let txn_mgr = self.txn_manager.as_mut().ok_or(KvError::DatabaseClosed)?;
@@ -120,15 +168,74 @@ impl KVEngine {
             }
             Ok(false)
         } else {
-            Ok(txn_mgr.get_btree_mut().remove(key)?)
+            // 非事务模式：自动事务包装，写入 WAL 日志确保持久性
+            let auto_id = txn_mgr.auto_txn_id();
+
+            // 写入 Delete WAL 记录
+            let delete_record = WALRecord {
+                lsn: 0,
+                txn_id: auto_id,
+                op_type: WALOpType::Delete,
+                key: key.to_vec(),
+                value: None,
+                crc: 0,
+            };
+            txn_mgr.write_wal_record(delete_record)?;
+
+            // 执行 B+ 树删除
+            let result = txn_mgr.get_btree_mut().remove(key)?;
+
+            // 写入 Commit WAL 记录
+            let commit_record = WALRecord {
+                lsn: 0,
+                txn_id: auto_id,
+                op_type: WALOpType::Commit,
+                key: Vec::new(),
+                value: None,
+                crc: 0,
+            };
+            txn_mgr.write_wal_record(commit_record)?;
+
+            Ok(result)
         }
     }
-
     /// 范围扫描
     pub fn scan(&mut self, start: &[u8], end: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         self.check_open()?;
         let txn_mgr = self.txn_manager.as_mut().ok_or(KvError::DatabaseClosed)?;
         Ok(txn_mgr.get_btree_mut().range_scan(start, end))
+    }
+
+    /// 前缀扫描
+    /// 查找所有以指定前缀开头的键值对
+    /// 通过将前缀转换为范围来实现：起始键 = prefix，结束键 = prefix 最后一个字节 +1
+    pub fn prefix_scan(&mut self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.check_open()?;
+        let end_key = Self::compute_prefix_end(prefix);
+        let results = self.scan(prefix, &end_key)?;
+        // 过滤确保只返回真正以 prefix 开头的键（排除边界键）
+        Ok(results
+            .into_iter()
+            .filter(|(k, _)| k.starts_with(prefix))
+            .collect())
+    }
+
+    /// 计算前缀上界键
+    /// 将前缀最后一个字节加 1；若最后一个字节为 0xFF，则追加 0x00
+    fn compute_prefix_end(prefix: &[u8]) -> Vec<u8> {
+        if prefix.is_empty() {
+            // 空前缀：返回最大单字节作为上界
+            return vec![0xFF];
+        }
+        let mut end = prefix.to_vec();
+        if let Some(last) = end.last_mut() {
+            if *last < 0xFF {
+                *last += 1;
+            } else {
+                end.push(0x00);
+            }
+        }
+        end
     }
 
     /// 开启事务
